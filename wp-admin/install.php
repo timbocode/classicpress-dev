@@ -73,7 +73,7 @@ $php_compat    = version_compare( $php_version, $required_php_version, '>=' );
 $mysql_compat  = version_compare( $mysql_version, $required_mysql_version, '>=' ) || file_exists( WP_CONTENT_DIR . '/db.php' );
 
 // Generate the CP download URL.
-$cp_download_url = 'https://github.com/ClassicPress/ClassicPress-release';
+$cp_download_url = 'https://github.com/timbocode/classicpress-dev';
 if ( ! strstr( $cp_version, '+' ) ) {
 	$cp_download_url .= '/releases/' . $cp_version;
 }
