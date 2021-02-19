@@ -240,10 +240,10 @@ function update_nag() {
 			__( '<a href="%1$s">ClassicPress %2$s</a> is available! <a href="%3$s" aria-label="%4$s">Please update now</a>.' ),
 			sprintf(
 				/* translators: %s: ClassicPress version */
-				esc_url( __( 'https://www.classicpress.net/version/%s' ) ),
-				$cur->current
+				esc_url( __( 'https://github.com/timbocode/classicpress-dev/releases/tag/%s' ) ),
+				'1.2.1'
 			),
-			$cur->current,
+			'1.2.1',
 			network_admin_url( 'update-core.php' ),
 			esc_attr__( 'Please update ClassicPress now' )
 		);
@@ -253,8 +253,8 @@ function update_nag() {
 			__( '<a href="%1$s">ClassicPress %2$s</a> is available! Please notify the site administrator.' ),
 			sprintf(
 				/* translators: %s: ClassicPress version */
-				esc_url( __( 'https://www.classicpress.net/version/%s' ) ),
-				$cur->current
+				esc_url( __( 'https://github.com/timbocode/classicpress-dev/releases/tag/%s' ) ),
+				'1.2.1'
 			),
 			$cur->current
 		);
@@ -601,10 +601,8 @@ function maintenance_nag() {
 		 * This flag is cleared whenever a successful update occurs using Core_Upgrader.
 		 */
 		$comparison = ! empty( $failed['critical'] ) ? '>=' : '>';
-
-		if ( isset( $failed['attempted'] ) && version_compare( $failed['attempted'], $wp_version, $comparison ) ) {
+		if ( version_compare( $failed['attempted'], $wp_version, $comparison ) )
 			$nag = true;
-		}
 	}
 
 	if ( ! $nag )
