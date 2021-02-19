@@ -1,742 +1,843 @@
 <?php
 /**
- * ClassicPress core upgrade functionality.
+ * Update Core administration panel.
  *
  * @package ClassicPress
  * @subpackage Administration
- * @since WP-2.7.0
  */
 
-/**
- * Stores files to be deleted.
- *
- * @since WP-2.7.0
- * @global array $_old_files
- * @var array
- * @name $_old_files
- */
-global $_old_files;
-
-$_old_files = array(
-	// Added in WP-5.0.0, not included in ClassicPress
-	'wp-admin/includes/credits.php',
-	'wp-admin/edit-form-blocks.php',
-	'wp-includes/blocks',
-	'wp-includes/css/dist',
-	'wp-includes/js/dist',
-	'wp-includes/rest-api/endpoints/class-wp-rest-autosaves-controller.php',
-	'wp-includes/rest-api/endpoints/class-wp-rest-block-renderer-controller.php',
-	'wp-includes/rest-api/endpoints/class-wp-rest-blocks-controller.php',
-	'wp-includes/rest-api/endpoints/class-wp-rest-search-controller.php',
-	'wp-includes/rest-api/endpoints/class-wp-rest-themes-controller.php',
-	'wp-includes/rest-api/search',
-	'wp-includes/blocks.php',
-	'wp-includes/class-wp-block-parser.php',
-	'wp-includes/class-wp-block-type.php',
-	'wp-includes/class-wp-block-type-registry.php',
-	// Removed in 1.0.0-rc1
-	'wp-admin/includes/class-wp-community-events.php',
-	// Added in WP-5.2.3 or older, not included in ClassicPress
-	'wp-admin/css/site-health-rtl.css',
-	'wp-admin/css/site-health-rtl.min.css',
-	'wp-admin/css/site-health.css',
-	'wp-admin/css/site-health.min.css',
-	'wp-admin/includes/class-wp-debug-data.php',
-	'wp-admin/includes/class-wp-site-health-auto-updates.php',
-	'wp-admin/includes/class-wp-site-health.php',
-	'wp-admin/js/site-health.js',
-	'wp-admin/js/site-health.min.js',
-	'wp-admin/site-health-info.php',
-	'wp-admin/site-health.php',
-	'wp-includes/class-wp-fatal-error-handler.php',
-	'wp-includes/class-wp-paused-extensions-storage.php',
-	'wp-includes/class-wp-recovery-mode-cookie-service.php',
-	'wp-includes/class-wp-recovery-mode-email-service.php',
-	'wp-includes/class-wp-recovery-mode-key-service.php',
-	'wp-includes/class-wp-recovery-mode-link-service.php',
-	'wp-includes/class-wp-recovery-mode.php',
-	'wp-includes/error-protection.php',
-	'wp-includes/fonts/dashicons.woff2',
-	'wp-includes/js/backbone.js',
-	'wp-includes/js/clipboard.js',
-	'wp-includes/js/clipboard.min.js',
-	'wp-includes/js/codemirror/esprima.js',
-	'wp-includes/js/codemirror/fakejshint.js',
-	'wp-includes/js/tinymce/wp-tinymce.js',
-	'wp-includes/js/underscore.js',
-	'wp-includes/ms-network.php',
-	'wp-includes/ms-site.php',
-	'wp-includes/sodium_compat',
-);
-
-/**
- * Stores new files in wp-content to copy
- *
- * The contents of this array indicate any new bundled plugins/themes which
- * should be installed with the ClassicPress Upgrade. These items will not be
- * re-installed in future upgrades, this behaviour is controlled by the
- * introduced version present here being older than the current installed version.
- *
- * The content of this array should follow the following format:
- * Filename (relative to wp-content) => Introduced version
- * Directories should be noted by suffixing it with a trailing slash (/)
- *
- * @since WP-3.2.0
- * @since WP-4.7.0 New themes were not automatically installed for 4.4-4.6 on
- *              upgrade. New themes are now installed again. To disable new
- *              themes from being installed on upgrade, explicitly define
- *              CORE_UPGRADE_SKIP_NEW_BUNDLED as false.
- * @global array $_new_bundled_files
- * @var array
- * @name $_new_bundled_files
- */
-global $_new_bundled_files;
-
-$_new_bundled_files = array(
-	'plugins/akismet/'        => '2.0',
-	'themes/twentyten/'       => '3.0',
-	'themes/twentyeleven/'    => '3.2',
-	'themes/twentytwelve/'    => '3.5',
-	'themes/twentythirteen/'  => '3.6',
-	'themes/twentyfourteen/'  => '3.8',
-	'themes/twentyfifteen/'   => '4.1',
-	'themes/twentysixteen/'   => '4.4',
-	'themes/twentyseventeen/' => '4.7',
-);
-
-/**
- * Upgrades the core of ClassicPress.
- *
- * This will create a .maintenance file at the base of the ClassicPress directory
- * to ensure that people can not access the web site, when the files are being
- * copied to their locations.
- *
- * The files in the `$_old_files` list will be removed and the new files
- * copied from the zip file after the database is upgraded.
- *
- * The files in the `$_new_bundled_files` list will be added to the installation
- * if the version is greater than or equal to the old version being upgraded.
- *
- * The steps for the upgrader for after the new release is downloaded and
- * unzipped is:
- *   1. Test unzipped location for select files to ensure that unzipped worked.
- *   2. Create the .maintenance file in current ClassicPress base.
- *   3. Copy new ClassicPress directory over old ClassicPress files.
- *   4. Upgrade ClassicPress to new version.
- *     4.1. Copy all files/folders other than wp-content
- *     4.2. Copy any language files to WP_LANG_DIR (which may differ from WP_CONTENT_DIR
- *     4.3. Copy any new bundled themes/plugins to their respective locations
- *   5. Delete new ClassicPress directory path.
- *   6. Delete .maintenance file.
- *   7. Remove old files.
- *   8. Delete 'update_core' option.
- *
- * There are several areas of failure. For instance if PHP times out before step
- * 6, then you will not be able to access any portion of your site. Also, since
- * the upgrade will not continue where it left off, you will not be able to
- * automatically remove old files and remove the 'update_core' option. This
- * isn't that bad.
- *
- * If the copy of the new ClassicPress over the old fails, then the worse is that
- * the new ClassicPress directory will remain.
- *
- * If it is assumed that every file will be copied over, including plugins and
- * themes, then if you edit the default theme, you should rename it, so that
- * your changes remain.
- *
- * @since WP-2.7.0
- *
- * @global WP_Filesystem_Base $wp_filesystem
- * @global array              $_old_files
- * @global array              $_new_bundled_files
- * @global wpdb               $wpdb
- * @global string             $wp_version
- * @global string             $required_php_version
- * @global string             $required_mysql_version
- *
- * @param string $from New release unzipped path.
- * @param string $to   Path to old ClassicPress installation.
- * @return WP_Error|null WP_Error on failure, null on success.
- */
-function update_core($from, $to) {
-	global $wp_filesystem, $_old_files, $_new_bundled_files, $wpdb;
-
-	@set_time_limit( 300 );
-
-	/**
-	 * Filters feedback messages displayed during the core update process.
-	 *
-	 * The filter is first evaluated after the zip file for the latest version
-	 * has been downloaded and unzipped. It is evaluated five more times during
-	 * the process:
-	 *
-	 * 1. Before ClassicPress begins the core upgrade process.
-	 * 2. Before Maintenance Mode is enabled.
-	 * 3. Before ClassicPress begins copying over the necessary files.
-	 * 4. Before Maintenance Mode is disabled.
-	 * 5. Before the database is upgraded.
-	 *
-	 * @since WP-2.5.0
-	 *
-	 * @param string $feedback The core update feedback messages.
-	 */
-	apply_filters( 'update_feedback', __( 'Verifying the unpacked files&#8230;' ) );
-
-	// Sanity check the unzipped distribution.
-	$distro = cp_get_update_directory_root( $from );
-	if ( ! $distro ) {
-		$wp_filesystem->delete( $from, true );
-		return new WP_Error( 'insane_distro', __('The update could not be unpacked') );
-	}
-
-	// Import $cp_version, $wp_version, $required_php_version, and
-	// $required_mysql_version from the new version.
-	//
-	// NOTE: These variables are NOT modified in the global scope, and this
-	// function is using all variables imported from `version-current.php` in
-	// the local scope!  Do not declare any of these variables as global.
-	$versions_file = trailingslashit( $wp_filesystem->wp_content_dir() ) . 'upgrade/version-current.php';
-	if ( ! $wp_filesystem->copy( $from . $distro . 'wp-includes/version.php', $versions_file ) ) {
-		$wp_filesystem->delete( $from, true );
-		return new WP_Error( 'copy_failed_for_version_file', __( 'The update cannot be installed because we will be unable to copy some files. This is usually due to inconsistent file permissions.' ), 'wp-includes/version.php' );
-	}
-
-	$wp_filesystem->chmod( $versions_file, FS_CHMOD_FILE );
-	require( WP_CONTENT_DIR . '/upgrade/version-current.php' );
-	$wp_filesystem->delete( $versions_file );
-
-	$php_version    = phpversion();
-	$mysql_version  = $wpdb->db_version();
-	$old_wp_version = $GLOBALS['wp_version']; // The version of ClassicPress or WordPress we're updating from
-	$development_build = ( false !== strpos( $old_wp_version . $wp_version, '-' )  ); // a dash in the version indicates a Development release
-	$php_compat     = version_compare( $php_version, $required_php_version, '>=' );
-	if ( file_exists( WP_CONTENT_DIR . '/db.php' ) && empty( $wpdb->is_mysql ) )
-		$mysql_compat = true;
-	else
-		$mysql_compat = version_compare( $mysql_version, $required_mysql_version, '>=' );
-
-	if ( !$mysql_compat || !$php_compat )
-		$wp_filesystem->delete($from, true);
-
-	if ( !$mysql_compat && !$php_compat )
-		return new WP_Error( 'php_mysql_not_compatible', sprintf( __('The update cannot be installed because ClassicPress %1$s requires PHP version %2$s or higher and MySQL version %3$s or higher. You are running PHP version %4$s and MySQL version %5$s.'), $wp_version, $required_php_version, $required_mysql_version, $php_version, $mysql_version ) );
-	elseif ( !$php_compat )
-		return new WP_Error( 'php_not_compatible', sprintf( __('The update cannot be installed because ClassicPress %1$s requires PHP version %2$s or higher. You are running version %3$s.'), $wp_version, $required_php_version, $php_version ) );
-	elseif ( !$mysql_compat )
-		return new WP_Error( 'mysql_not_compatible', sprintf( __('The update cannot be installed because ClassicPress %1$s requires MySQL version %2$s or higher. You are running version %3$s.'), $wp_version, $required_mysql_version, $mysql_version ) );
-
-	/** This filter is documented in wp-admin/includes/update-core.php */
-	apply_filters( 'update_feedback', __( 'Preparing to install the latest version&#8230;' ) );
-
-	// Don't copy wp-content, we'll deal with that below
-	// We also copy version.php last so failed updates report their old version
-	$skip = array( 'wp-content', 'wp-includes/version.php' );
-	$check_is_writable = array();
-
-	// Check to see which files don't really need updating - only available for 3.7 and higher
-	if ( function_exists( 'get_core_checksums' ) ) {
-		// Find the local version of the working directory
-		$working_dir_local = WP_CONTENT_DIR . '/upgrade/' . basename( $from ) . $distro;
-
-		$checksums = get_core_checksums( $wp_version, isset( $wp_local_package ) ? $wp_local_package : 'en_US' );
-		if ( is_array( $checksums ) && isset( $checksums[ $wp_version ] ) )
-			$checksums = $checksums[ $wp_version ]; // Compat code for 3.7-beta2
-		if ( is_array( $checksums ) ) {
-			foreach ( $checksums as $file => $checksum ) {
-				if ( 'wp-content' == substr( $file, 0, 10 ) )
-					continue;
-				if ( ! file_exists( ABSPATH . $file ) )
-					continue;
-				if ( ! file_exists( $working_dir_local . $file ) )
-					continue;
-				if ( '.' === dirname( $file ) && in_array( pathinfo( $file, PATHINFO_EXTENSION ), array( 'html', 'txt' ) ) )
-					continue;
-				if ( md5_file( ABSPATH . $file ) === $checksum )
-					$skip[] = $file;
-				else
-					$check_is_writable[ $file ] = ABSPATH . $file;
-			}
-		}
-	}
-
-	// If we're using the direct method, we can predict write failures that are due to permissions.
-	if ( $check_is_writable && 'direct' === $wp_filesystem->method ) {
-		$files_writable = array_filter( $check_is_writable, array( $wp_filesystem, 'is_writable' ) );
-		if ( $files_writable !== $check_is_writable ) {
-			$files_not_writable = array_diff_key( $check_is_writable, $files_writable );
-echo "Files not writable...".PHP_EOL;
-print_r($files_not_writable);
-			foreach ( $files_not_writable as $relative_file_not_writable => $file_not_writable ) {
-				// If the writable check failed, chmod file to 0644 and try again, same as copy_dir().
-				$wp_filesystem->chmod( $file_not_writable, FS_CHMOD_FILE );
-				if ( $wp_filesystem->is_writable( $file_not_writable ) )
-apply_filters( 'update_feedback', __( 'Files not writable: ' . $file_not_writable ) );
-					unset( $files_not_writable[ $relative_file_not_writable ] );
-			}
-
-			// Store package-relative paths (the key) of non-writable files in the WP_Error object.
-			$error_data = version_compare( $old_wp_version, '3.7-beta2', '>' ) ? array_keys( $files_not_writable ) : '';
-
-			if ( $files_not_writable )
-				return new WP_Error( 'files_not_writable', __( 'The update cannot be installed because we will be unable to copy some files. This is usually due to inconsistent file permissions.' ), implode( ', ', $error_data ) );
-		}
-	}
-
-	/** This filter is documented in wp-admin/includes/update-core.php */
-	apply_filters( 'update_feedback', __( 'Enabling Maintenance mode&#8230;' ) );
-	// Create maintenance file to signal that we are upgrading
-	$maintenance_string = '<?php $upgrading = ' . time() . '; ?>';
-	$maintenance_file = $to . '.maintenance';
-	$wp_filesystem->delete($maintenance_file);
-	$wp_filesystem->put_contents($maintenance_file, $maintenance_string, FS_CHMOD_FILE);
-
-	/** This filter is documented in wp-admin/includes/update-core.php */
-	apply_filters( 'update_feedback', __( 'Copying the required files&#8230;' ) );
-	// Copy new versions of WP files into place.
-	$result = _copy_dir( $from . $distro, $to, $skip );
-	if ( is_wp_error( $result ) )
-		$result = new WP_Error( $result->get_error_code(), $result->get_error_message(), substr( $result->get_error_data(), strlen( $to ) ) );
-
-	// Since we know the core files have copied over, we can now copy the version file
-	if ( ! is_wp_error( $result ) ) {
-		if ( ! $wp_filesystem->copy( $from . $distro . 'wp-includes/version.php', $to . 'wp-includes/version.php', true /* overwrite */ ) ) {
-			$wp_filesystem->delete( $from, true );
-			$result = new WP_Error( 'copy_failed_for_version_file', __( 'The update cannot be installed because we will be unable to copy some files. This is usually due to inconsistent file permissions.' ), 'wp-includes/version.php' );
-		}
-		$wp_filesystem->chmod( $to . 'wp-includes/version.php', FS_CHMOD_FILE );
-	}
-
-	// Check to make sure everything copied correctly, ignoring the contents of wp-content
-	$skip = array( 'wp-content' );
-	$failed = array();
-	if ( isset( $checksums ) && is_array( $checksums ) ) {
-		foreach ( $checksums as $file => $checksum ) {
-			if ( 'wp-content' == substr( $file, 0, 10 ) )
-				continue;
-			if ( ! file_exists( $working_dir_local . $file ) )
-				continue;
-			if ( '.' === dirname( $file ) && in_array( pathinfo( $file, PATHINFO_EXTENSION ), array( 'html', 'txt' ) ) ) {
-				$skip[] = $file;
-				continue;
-			}
-			if ( file_exists( ABSPATH . $file ) && md5_file( ABSPATH . $file ) == $checksum )
-				$skip[] = $file;
-			else
-				$failed[] = $file;
-		}
-	}
-
-	// Some files didn't copy properly
-	if ( ! empty( $failed ) ) {
-		$total_size = 0;
-		foreach ( $failed as $file ) {
-			if ( file_exists( $working_dir_local . $file ) )
-				$total_size += filesize( $working_dir_local . $file );
-		}
-
-		// If we don't have enough free space, it isn't worth trying again.
-		// Unlikely to be hit due to the check in unzip_file().
-		$available_space = @disk_free_space( ABSPATH );
-		if ( $available_space && $total_size >= $available_space ) {
-			$result = new WP_Error( 'disk_full', __( 'There is not enough free disk space to complete the update.' ) );
-		} else {
-			$result = _copy_dir( $from . $distro, $to, $skip );
-			if ( is_wp_error( $result ) )
-				$result = new WP_Error( $result->get_error_code() . '_retry', $result->get_error_message(), substr( $result->get_error_data(), strlen( $to ) ) );
-		}
-	}
-
-	// Custom Content Directory needs updating now.
-	// Copy Languages
-	if ( !is_wp_error($result) && $wp_filesystem->is_dir($from . $distro . 'wp-content/languages') ) {
-		if ( WP_LANG_DIR != ABSPATH . WPINC . '/languages' || @is_dir(WP_LANG_DIR) )
-			$lang_dir = WP_LANG_DIR;
-		else
-			$lang_dir = WP_CONTENT_DIR . '/languages';
-
-		if ( !@is_dir($lang_dir) && 0 === strpos($lang_dir, ABSPATH) ) { // Check the language directory exists first
-			$wp_filesystem->mkdir($to . str_replace(ABSPATH, '', $lang_dir), FS_CHMOD_DIR); // If it's within the ABSPATH we can handle it here, otherwise they're out of luck.
-			clearstatcache(); // for FTP, Need to clear the stat cache
-		}
-
-		if ( @is_dir($lang_dir) ) {
-			$wp_lang_dir = $wp_filesystem->find_folder($lang_dir);
-			if ( $wp_lang_dir ) {
-				$result = copy_dir($from . $distro . 'wp-content/languages/', $wp_lang_dir);
-				if ( is_wp_error( $result ) )
-					$result = new WP_Error( $result->get_error_code() . '_languages', $result->get_error_message(), substr( $result->get_error_data(), strlen( $wp_lang_dir ) ) );
-			}
-		}
-	}
-
-	/** This filter is documented in wp-admin/includes/update-core.php */
-	apply_filters( 'update_feedback', __( 'Disabling Maintenance mode&#8230;' ) );
-	// Remove maintenance file, we're done with potential site-breaking changes
-	$wp_filesystem->delete( $maintenance_file );
-
-	// WP-3.5 -> WP-3.5+ - an empty twentytwelve directory was created upon upgrade to WP-3.5 for some users, preventing installation of Twenty Twelve.
-	if ( '3.5' == $old_wp_version ) {
-		if ( is_dir( WP_CONTENT_DIR . '/themes/twentytwelve' ) && ! file_exists( WP_CONTENT_DIR . '/themes/twentytwelve/style.css' )  ) {
-			$wp_filesystem->delete( $wp_filesystem->wp_themes_dir() . 'twentytwelve/' );
-		}
-	}
-
-	// Copy New bundled plugins & themes
-	// This gives us the ability to install new plugins & themes bundled with future versions of ClassicPress whilst avoiding the re-install upon upgrade issue.
-	// $development_build controls us overwriting bundled themes and plugins when a non-stable release is being updated
-	if ( !is_wp_error($result) && ( ! defined('CORE_UPGRADE_SKIP_NEW_BUNDLED') || ! CORE_UPGRADE_SKIP_NEW_BUNDLED ) ) {
-		foreach ( (array) $_new_bundled_files as $file => $introduced_version ) {
-			// If a $development_build or if $introduced version is greater than what the site was previously running
-			if ( $development_build || version_compare( $introduced_version, $old_wp_version, '>' ) ) {
-				$directory = ('/' == $file[ strlen($file)-1 ]);
-				list($type, $filename) = explode('/', $file, 2);
-
-				// Check to see if the bundled items exist before attempting to copy them
-				if ( ! $wp_filesystem->exists( $from . $distro . 'wp-content/' . $file ) )
-					continue;
-
-				if ( 'plugins' == $type )
-					$dest = $wp_filesystem->wp_plugins_dir();
-				elseif ( 'themes' == $type )
-					$dest = trailingslashit($wp_filesystem->wp_themes_dir()); // Back-compat, ::wp_themes_dir() did not return trailingslash'd pre-3.2
-				else
-					continue;
-
-				if ( ! $directory ) {
-					if ( ! $development_build && $wp_filesystem->exists( $dest . $filename ) )
-						continue;
-
-					if ( ! $wp_filesystem->copy($from . $distro . 'wp-content/' . $file, $dest . $filename, FS_CHMOD_FILE) )
-						$result = new WP_Error( "copy_failed_for_new_bundled_$type", __( 'Could not copy file.' ), $dest . $filename );
-				} else {
-					if ( ! $development_build && $wp_filesystem->is_dir( $dest . $filename ) )
-						continue;
-
-					$wp_filesystem->mkdir($dest . $filename, FS_CHMOD_DIR);
-					$_result = copy_dir( $from . $distro . 'wp-content/' . $file, $dest . $filename);
-
-					// If a error occurs partway through this final step, keep the error flowing through, but keep process going.
-					if ( is_wp_error( $_result ) ) {
-						if ( ! is_wp_error( $result ) )
-							$result = new WP_Error;
-						$result->add( $_result->get_error_code() . "_$type", $_result->get_error_message(), substr( $_result->get_error_data(), strlen( $dest ) ) );
-					}
-				}
-			}
-		} //end foreach
-	}
-
-	// Handle $result error from the above blocks
-	if ( is_wp_error($result) ) {
-		$wp_filesystem->delete($from, true);
-		return $result;
-	}
-
-	// Remove old files
-	foreach ( $_old_files as $old_file ) {
-		$old_file = $to . $old_file;
-		if ( !$wp_filesystem->exists($old_file) )
-			continue;
-
-		// If the file isn't deleted, try writing an empty string to the file instead.
-		if ( ! $wp_filesystem->delete( $old_file, true ) && $wp_filesystem->is_file( $old_file ) ) {
-			$wp_filesystem->put_contents( $old_file, '' );
-		}
-	}
-
-	// Remove any Genericons example.html's from the filesystem
-	_upgrade_422_remove_genericons();
-
-	// Remove the REST API plugin if its version is Beta 4 or lower
-	_upgrade_440_force_deactivate_incompatible_plugins();
-
-	// Upgrade DB with separate request
-	/** This filter is documented in wp-admin/includes/update-core.php */
-	apply_filters( 'update_feedback', __( 'Upgrading database&#8230;' ) );
-	$db_upgrade_url = admin_url('upgrade.php?step=upgrade_db');
-	wp_remote_post($db_upgrade_url, array('timeout' => 60));
-
-	// Clear the cache to prevent an update_option() from saving a stale db_version to the cache
-	wp_cache_flush();
-	// (Not all cache back ends listen to 'flush')
-	wp_cache_delete( 'alloptions', 'options' );
-
-	// Remove working directory
-	$wp_filesystem->delete($from, true);
-
-	// Force refresh of update information
-	if ( function_exists('delete_site_transient') )
-		delete_site_transient('update_core');
-	else
-		delete_option('update_core');
-
-	/**
-	 * Fires after ClassicPress core has been successfully updated.
-	 *
-	 * @since 1.0.0
-	 *
-	 * @param string $cp_version The current ClassicPress version.
-	 */
-	do_action( 'classicpress_core_updated_successfully', $cp_version );
-
-	/**
-	 * Fires after ClassicPress core has been successfully updated.
-	 *
-	 * Note: Passes the equivalent compatible WordPress version for compatibility.
-	 *
-	 * @see 'classicpress_core_updated_successfully'
-	 *
-	 * @since WP-3.3.0
-	 *
-	 * @param string $wp_version The current equivalent WordPress version, for compatibility.
-	 */
-	do_action( '_core_updated_successfully', $wp_version );
-
-	// Clear the option that blocks auto updates after failures, now that we've been successful.
-	if ( function_exists( 'delete_site_option' ) )
-		delete_site_option( 'auto_core_update_failed' );
-
-	return $cp_version;
-}
-
-/**
- * Verifies and returns the root directory entry of a ClassicPress update.
- *
- * For WordPress, this was always '/wordpress/'.  For ClassicPress, since
- * GitHub builds our zip packages for us, the zip file (and therefore the
- * directory where it was unpacked) will contain a single directory entry whose
- * name starts with 'ClassicPress-'.
- *
- * We also need to allow the root directory to be called 'wordpress', since
- * this is used when migrating from WordPress to ClassicPress.  If the
- * directory is named otherwise, the WordPress updater will reject the update
- * package for the migration.
- *
- * NOTE: This function is duplicated in class-core-upgrader.php.  This
- * duplication is intentional, as the load order during an upgrade is quite
- * complicated and this is the simplest way to make sure that this code is
- * always available.
- *
- * @since 1.0.0
- *
- * @param string $working_dir The directory where a ClassicPress update package
- *                            has been extracted.
- *
- * @return string|null The root directory entry that contains the new files, or
- *                     `null` if this does not look like a valid update.
- */
-function cp_get_update_directory_root( $working_dir ) {
-	global $wp_filesystem;
-
-	$distro = null;
-	$entries = array_values( $wp_filesystem->dirlist( $working_dir ) );
-
-	if (
-		count( $entries ) === 1 &&
-		(
-			substr( $entries[0]['name'], 0, 13 ) === 'ClassicPress-' ||
-			$entries[0]['name'] === 'wordpress' // migration build
-		) &&
-		$entries[0]['type'] === 'd'
-	) {
-		$distro = '/' . $entries[0]['name'] . '/';
-		$root = $working_dir . $distro;
-		if (
-			! $wp_filesystem->exists( $root . 'readme.html' ) ||
-			! $wp_filesystem->exists( $root . 'wp-includes/version.php' )
-		) {
-			$distro = null;
-		}
-	}
-
-	return $distro;
-}
-
-/**
- * Copies a directory from one location to another via the ClassicPress Filesystem Abstraction.
- * Assumes that WP_Filesystem() has already been called and setup.
- *
- * This is a temporary function for the 3.1 -> 3.2 upgrade, as well as for those upgrading to
- * 3.7+
- *
- * @ignore
- * @since WP-3.2.0
- * @since WP-3.7.0 Updated not to use a regular expression for the skip list
- * @see copy_dir()
- *
- * @global WP_Filesystem_Base $wp_filesystem
- *
- * @param string $from     source directory
- * @param string $to       destination directory
- * @param array $skip_list a list of files/folders to skip copying
- * @return mixed WP_Error on failure, True on success.
- */
-function _copy_dir($from, $to, $skip_list = array() ) {
-	global $wp_filesystem;
-
-	$dirlist = $wp_filesystem->dirlist($from);
-
-	$from = trailingslashit($from);
-	$to = trailingslashit($to);
-
-	foreach ( (array) $dirlist as $filename => $fileinfo ) {
-		if ( in_array( $filename, $skip_list ) )
-			continue;
-
-		if ( 'f' == $fileinfo['type'] ) {
-			if ( ! $wp_filesystem->copy($from . $filename, $to . $filename, true, FS_CHMOD_FILE) ) {
-				// If copy failed, chmod file to 0644 and try again.
-				$wp_filesystem->chmod( $to . $filename, FS_CHMOD_FILE );
-				if ( ! $wp_filesystem->copy($from . $filename, $to . $filename, true, FS_CHMOD_FILE) )
-					return new WP_Error( 'copy_failed__copy_dir', __( 'Could not copy file.' ), $to . $filename );
-			}
-		} elseif ( 'd' == $fileinfo['type'] ) {
-			if ( !$wp_filesystem->is_dir($to . $filename) ) {
-				if ( !$wp_filesystem->mkdir($to . $filename, FS_CHMOD_DIR) )
-					return new WP_Error( 'mkdir_failed__copy_dir', __( 'Could not create directory.' ), $to . $filename );
-			}
-
-			/*
-			 * Generate the $sub_skip_list for the subdirectory as a sub-set
-			 * of the existing $skip_list.
-			 */
-			$sub_skip_list = array();
-			foreach ( $skip_list as $skip_item ) {
-				if ( 0 === strpos( $skip_item, $filename . '/' ) )
-					$sub_skip_list[] = preg_replace( '!^' . preg_quote( $filename, '!' ) . '/!i', '', $skip_item );
-			}
-
-			$result = _copy_dir($from . $filename, $to . $filename, $sub_skip_list);
-			if ( is_wp_error($result) )
-				return $result;
-		}
-	}
-	return true;
-}
-
-/**
- * Redirect to the About ClassicPress page after a successful upgrade.
- *
- * This function is only needed when the existing installation is older than 3.4.0.
- *
- * @since WP-3.3.0
- *
- * @global string $wp_version
- * @global string $pagenow
- * @global string $action
- *
- * @param string $new_version
- */
-function _redirect_to_about_wordpress( $new_version ) {
-	global $wp_version, $pagenow, $action;
-
-	if ( version_compare( $wp_version, '3.4-RC1', '>=' ) )
-		return;
-
-	// Ensure we only run this on the update-core.php page. The Core_Upgrader may be used in other contexts.
-	if ( 'update-core.php' != $pagenow )
-		return;
-
- 	if ( 'do-core-upgrade' != $action && 'do-core-reinstall' != $action )
- 		return;
-
-	// Load the updated default text localization domain for new strings.
-	load_default_textdomain();
-
-	// See do_core_upgrade()
-	show_message( __('ClassicPress updated successfully') );
-
-	// self_admin_url() won't exist when upgrading from <= 3.0, so relative URLs are intentional.
-	show_message( '<span class="hide-if-no-js">' . sprintf( __( 'Welcome to ClassicPress %1$s. You will be redirected to the About ClassicPress screen. If not, click <a href="%2$s">here</a>.' ), $new_version, 'about.php?updated' ) . '</span>' );
-	show_message( '<span class="hide-if-js">' . sprintf( __( 'Welcome to ClassicPress %1$s. <a href="%2$s">Learn more</a>.' ), $new_version, 'about.php?updated' ) . '</span>' );
-	echo '</div>';
-	?>
-<script type="text/javascript">
-window.location = 'about.php?updated';
-</script>
-	<?php
-
-	// Include admin-footer.php and exit.
-	include(ABSPATH . 'wp-admin/admin-footer.php');
+/** ClassicPress Administration Bootstrap */
+require_once( dirname( __FILE__ ) . '/admin.php' );
+
+wp_enqueue_style( 'plugin-install' );
+wp_enqueue_script( 'plugin-install' );
+wp_enqueue_script( 'updates' );
+add_thickbox();
+
+if ( is_multisite() && ! is_network_admin() ) {
+	wp_redirect( network_admin_url( 'update-core.php' ) );
 	exit();
 }
 
+if ( ! current_user_can( 'update_core' ) && ! current_user_can( 'update_themes' ) && ! current_user_can( 'update_plugins' ) && ! current_user_can( 'update_languages' ) )
+	wp_die( __( 'Sorry, you are not allowed to update this site.' ) );
+
 /**
- * Cleans up Genericons example files.
  *
- * @since WP-4.2.2
+ * @global string $wp_local_package
+ * @global wpdb   $wpdb
  *
- * @global array              $wp_theme_directories
- * @global WP_Filesystem_Base $wp_filesystem
+ * @staticvar bool $first_pass
+ *
+ * @param object $update
  */
-function _upgrade_422_remove_genericons() {
-	global $wp_theme_directories, $wp_filesystem;
+function list_core_update( $update ) {
+ 	global $wp_local_package, $wpdb;
+  	static $first_pass = true;
 
-	// A list of the affected files using the filesystem absolute paths.
-	$affected_files = array();
+	$wp_version = get_bloginfo( 'version' );
 
-	// Themes
-	foreach ( $wp_theme_directories as $directory ) {
-		$affected_theme_files = _upgrade_422_find_genericons_files_in_folder( $directory );
-		$affected_files       = array_merge( $affected_files, $affected_theme_files );
+ 	if ( 'en_US' == $update->locale && 'en_US' == get_locale() )
+ 		$version_string = $update->current;
+ 	// If the only available update is a partial builds, it doesn't need a language-specific version string.
+ 	elseif ( 'en_US' == $update->locale && $update->packages->partial && $wp_version == $update->partial_version && ( $updates = get_core_updates() ) && 1 == count( $updates ) )
+ 		$version_string = $update->current;
+ 	else
+ 		$version_string = sprintf( "%s&ndash;<strong>%s</strong>", $update->current, $update->locale );
+
+	$current = false;
+	if ( !isset($update->response) || 'latest' == $update->response )
+		$current = true;
+	$submit = __('Update Now');
+	$form_action = 'update-core.php?action=do-core-upgrade';
+	$php_version    = phpversion();
+	$mysql_version  = $wpdb->db_version();
+	$show_buttons = true;
+	if ( 'development' == $update->response ) {
+		$message = __('You are using a development version of ClassicPress. You can update to the latest nightly build automatically:');
+	} else {
+		if ( $current ) {
+			$message = sprintf( __( 'If you need to re-install version %s, you can do so here:' ), $version_string );
+			$submit = __('Re-install Now');
+			$form_action = 'update-core.php?action=do-core-reinstall';
+		} else {
+			$php_compat     = version_compare( $php_version, $update->php_version, '>=' );
+			if ( file_exists( WP_CONTENT_DIR . '/db.php' ) && empty( $wpdb->is_mysql ) )
+				$mysql_compat = true;
+			else
+				$mysql_compat = version_compare( $mysql_version, $update->mysql_version, '>=' );
+
+			if ( !$mysql_compat && !$php_compat )
+				/* translators: 1: ClassicPress version number, 2: Minimum required PHP version number, 3: Minimum required MySQL version number, 4: Current PHP version number, 5: Current MySQL version number */
+				$message = sprintf( __('You cannot update because <a href="https://www.classicpress.net/version/%1$s">ClassicPress %1$s</a> requires PHP version %2$s or higher and MySQL version %3$s or higher. You are running PHP version %4$s and MySQL version %5$s.'), $update->current, $update->php_version, $update->mysql_version, $php_version, $mysql_version );
+			elseif ( !$php_compat )
+				/* translators: 1: ClassicPress version number, 2: Minimum required PHP version number, 3: Current PHP version number */
+				$message = sprintf( __('You cannot update because <a href="https://www.classicpress.net/version/%1$s">ClassicPress %1$s</a> requires PHP version %2$s or higher. You are running version %3$s.'), $update->current, $update->php_version, $php_version );
+			elseif ( !$mysql_compat )
+				/* translators: 1: ClassicPress version number, 2: Minimum required MySQL version number, 3: Current MySQL version number */
+				$message = sprintf( __('You cannot update because <a href="https://www.classicpress.net/version/%1$s">ClassicPress %1$s</a> requires MySQL version %2$s or higher. You are running version %3$s.'), $update->current, $update->mysql_version, $mysql_version );
+			else
+				/* translators: 1: ClassicPress version number, 2: ClassicPress version number including locale if necessary */
+				$message = 	sprintf(__('You can update to <a href="https://github.com/timbocode/classicpress-dev/releases/tag/%1$s">ClassicPress %2$s</a> automatically:'), '1.2.1', '1.2.1');
+			if ( !$mysql_compat || !$php_compat )
+				$show_buttons = false;
+		}
 	}
 
-	// Plugins
-	$affected_plugin_files = _upgrade_422_find_genericons_files_in_folder( WP_PLUGIN_DIR );
-	$affected_files        = array_merge( $affected_files, $affected_plugin_files );
-
-	foreach ( $affected_files as $file ) {
-		$gen_dir = $wp_filesystem->find_folder( trailingslashit( dirname( $file ) ) );
-		if ( empty( $gen_dir ) ) {
-			continue;
+	echo '<p>';
+	echo $message;
+	echo '</p>';
+	echo '<form method="post" action="' . $form_action . '" name="upgrade" class="upgrade">';
+	wp_nonce_field('upgrade-core');
+	echo '<p>';
+	echo '<input name="version" value="'. esc_attr($update->current) .'" type="hidden"/>';
+	echo '<input name="locale" value="'. esc_attr($update->locale) .'" type="hidden"/>';
+	if ( $show_buttons ) {
+		if ( $first_pass ) {
+			submit_button( $submit, $current ? '' : 'primary regular', 'upgrade', false );
+			$first_pass = false;
+		} else {
+			submit_button( $submit, '', 'upgrade', false );
 		}
+	}
+	if ( 'en_US' != $update->locale )
+		if ( !isset( $update->dismissed ) || !$update->dismissed )
+			submit_button( __( 'Hide this update' ), '', 'dismiss', false );
+		else
+			submit_button( __( 'Bring back this update' ), '', 'undismiss', false );
+	echo '</p>';
+	if ( 'en_US' != $update->locale && ( !isset($wp_local_package) || $wp_local_package != $update->locale ) )
+	    echo '<p class="hint">'.__('This localized version contains both the translation and various other localization fixes. You can skip upgrading if you want to keep your current translation.').'</p>';
+	// Partial builds don't need language-specific warnings.
+	elseif ( 'en_US' == $update->locale && get_locale() != 'en_US' && ( ! $update->packages->partial && $wp_version == $update->partial_version ) ) {
+	    echo '<p class="hint">'.sprintf( __('You are about to install ClassicPress %s <strong>in English (US).</strong> There is a chance this update will break your translation. You may prefer to wait for the localized version to be released.'), $update->response != 'development' ? $update->current : '' ).'</p>';
+	}
+	echo '</form>';
 
-		// The path when the file is accessed via WP_Filesystem may differ in the case of FTP
-		$remote_file = $gen_dir . basename( $file );
+}
 
-		if ( ! $wp_filesystem->exists( $remote_file ) ) {
-			continue;
+/**
+ * @since WP-2.7.0
+ */
+function dismissed_updates() {
+	$dismissed = get_core_updates( array( 'dismissed' => true, 'available' => false ) );
+	if ( $dismissed ) {
+
+		$show_text = esc_js(__('Show hidden updates'));
+		$hide_text = esc_js(__('Hide hidden updates'));
+	?>
+	<script type="text/javascript">
+
+		jQuery(function($) {
+			$('dismissed-updates').show();
+			$('#show-dismissed').toggle(function(){$(this).text('<?php echo $hide_text; ?>');}, function() {$(this).text('<?php echo $show_text; ?>')});
+			$('#show-dismissed').click(function() { $('#dismissed-updates').toggle('slow');});
+		});
+	</script>
+	<?php
+		echo '<p class="hide-if-no-js"><a id="show-dismissed" href="#">'.__('Show hidden updates').'</a></p>';
+		echo '<ul id="dismissed-updates" class="core-updates dismissed">';
+		foreach ( (array) $dismissed as $update) {
+			echo '<li>';
+			list_core_update( $update );
+			echo '</li>';
 		}
-
-		if ( ! $wp_filesystem->delete( $remote_file, false, 'f' ) ) {
-			$wp_filesystem->put_contents( $remote_file, '' );
-		}
+		echo '</ul>';
 	}
 }
 
 /**
- * Recursively find Genericons example files in a given folder.
+ * Display upgrade ClassicPress for downloading latest or upgrading automatically form.
  *
- * @ignore
- * @since WP-4.2.2
+ * @since WP-2.7.0
  *
- * @param string $directory Directory path. Expects trailingslashed.
- * @return array
+ * @global string $required_php_version
+ * @global string $required_mysql_version
  */
-function _upgrade_422_find_genericons_files_in_folder( $directory ) {
-	$directory = trailingslashit( $directory );
-	$files     = array();
+function core_upgrade_preamble() {
+	global $required_php_version, $required_mysql_version;
 
-	if ( file_exists( "{$directory}example.html" ) && false !== strpos( file_get_contents( "{$directory}example.html" ), '<title>Genericons</title>' ) ) {
-		$files[] = "{$directory}example.html";
+	$wp_version = get_bloginfo( 'version' );
+	$updates = get_core_updates();
+
+	if ( ! isset( $updates[0]->response ) || 'latest' === $updates[0]->response ) {
+		if ( ! isset( $updates[0]->response ) ) {
+			if ( classicpress_is_dev_install() ) {
+				echo '<h2>';
+				_e( 'You are running a development version of ClassicPress.' );
+				echo "</h2>\n";
+				echo '<p>';
+				_e( 'Development versions of ClassicPress do not receive automatic updates.' );
+				echo "</p>\n";
+			} else {
+				echo '<h2>';
+				_e( 'Unable to determine whether a ClassicPress update is available.' );
+				echo "</h2>\n";
+				echo '<p>';
+				_e( 'You may be running a customized build of ClassicPress, or your server may be having internet connectivity problems.' );
+				echo "</p>\n";
+			}
+		} else { // 'latest'
+			echo '<h2>';
+			_e( 'You have the latest version of ClassicPress.' );
+			echo "</h2>\n";
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		$upgrader = new WP_Automatic_Updater;
+		$future_minor_update = (object) array(
+			'current'       => $wp_version . '.1.next.minor',
+			'version'       => $wp_version . '.1.next.minor',
+			'php_version'   => $required_php_version,
+			'mysql_version' => $required_mysql_version,
+		);
+		$should_auto_update = $upgrader->should_update( 'core', $future_minor_update, ABSPATH );
+		if ( $should_auto_update ) {
+			echo '<p>';
+			_e( 'Future security updates will be applied automatically.' );
+			echo "</p>\n";
+		}
+
+	} else {
+		echo '<div class="notice notice-warning"><p>';
+		/* translators: 1: Link to Backups documentation page, 2: Link to Updating documentation page */
+		printf(
+			__( '<strong>Important:</strong> before updating, please <a href="%1$s">back up your database and files</a>. For help with updates, visit the <a href="%2$s">Updating ClassicPress</a> documentation page.' ),
+			'https://codex.wordpress.org/WordPress_Backups',
+			'https://docs.classicpress.net/updating-classicpress/'
+		);
+		echo '</p></div>';
+
+		echo '<h2 class="response">';
+		_e( 'An updated version of ClassicPress is available.' );
+		echo '</h2>';
 	}
 
-	$dirs = glob( $directory . '*', GLOB_ONLYDIR );
-	if ( $dirs ) {
-		foreach ( $dirs as $dir ) {
-			$files = array_merge( $files, _upgrade_422_find_genericons_files_in_folder( $dir ) );
+	if ( isset( $updates[0] ) && $updates[0]->response == 'development' ) {
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		$upgrader = new WP_Automatic_Updater;
+		if ( $upgrader->should_update( 'core', $updates[0], ABSPATH ) ) {
+			echo '<div class="updated inline"><p>';
+			echo '<strong>' . __( 'BETA TESTERS:' ) . '</strong> ' . __( 'This site is set up to install updates of future beta versions automatically.' );
+			echo '</p></div>';
 		}
 	}
 
-	return $files;
+	echo '<ul class="core-updates">';
+	foreach ( (array) $updates as $update ) {
+		echo '<li>';
+		list_core_update( $update );
+		echo '</li>';
+	}
+	echo '</ul>';
+	// Don't show the maintenance mode notice when we are only showing a single re-install option.
+	if ( $updates && ( count( $updates ) > 1 || $updates[0]->response != 'latest' ) ) {
+		echo '<p>' . __( 'While your site is being updated, it will be in maintenance mode. As soon as your updates are complete, your site will return to normal.' ) . '</p>';
+	} elseif ( ! $updates ) {
+		echo '<p>' . sprintf(
+			__( '<a href="%s">Learn more about ClassicPress %s</a>.' ),
+			esc_url( self_admin_url( 'about.php' ) ),
+			classicpress_version()
+		) . '</p>';
+	}
+	dismissed_updates();
+}
+
+function list_plugin_updates() {
+	$wp_version = get_bloginfo( 'version' );
+	$cur_wp_version = preg_replace( '/-.*$/', '', $wp_version );
+	global $cp_version;
+	$cur_cp_version = preg_replace( '/\+.*$/', '', $cp_version );
+
+	require_once(ABSPATH . 'wp-admin/includes/plugin-install.php');
+	$plugins = get_plugin_updates();
+	if ( empty( $plugins ) ) {
+		echo '<h2>' . __( 'Plugins' ) . '</h2>';
+		echo '<p>' . __( 'Your plugins are all up to date.' ) . '</p>';
+		return;
+	}
+	$form_action = 'update-core.php?action=do-plugin-upgrade';
+
+	$core_updates = get_core_updates();
+	if ( !isset($core_updates[0]->response) || 'latest' == $core_updates[0]->response || 'development' == $core_updates[0]->response || version_compare( $core_updates[0]->current, $cur_wp_version, '=') )
+		$core_update_version = false;
+	else
+		$core_update_version = $core_updates[0]->current;
+	?>
+<h2><?php _e( 'Plugins' ); ?></h2>
+<p><?php _e( 'The following plugins have new versions available. Check the ones you want to update and then click &#8220;Update Plugins&#8221;.' ); ?></p>
+<form method="post" action="<?php echo esc_url( $form_action ); ?>" name="upgrade-plugins" class="upgrade">
+<?php wp_nonce_field('upgrade-core'); ?>
+<p><input id="upgrade-plugins" class="button" type="submit" value="<?php esc_attr_e('Update Plugins'); ?>" name="upgrade" /></p>
+<table class="widefat updates-table" id="update-plugins-table">
+	<thead>
+	<tr>
+		<td class="manage-column check-column"><input type="checkbox" id="plugins-select-all" /></td>
+		<td class="manage-column"><label for="plugins-select-all"><?php _e( 'Select All' ); ?></label></td>
+	</tr>
+	</thead>
+
+	<tbody class="plugins">
+<?php
+	foreach ( (array) $plugins as $plugin_file => $plugin_data ) {
+		$plugin_data = (object) _get_plugin_data_markup_translate( $plugin_file, (array) $plugin_data, false, true );
+
+		$icon = '<span class="dashicons dashicons-admin-plugins"></span>';
+		$preferred_icons = array( 'svg', '1x', '2x', 'default' );
+		foreach ( $preferred_icons as $preferred_icon ) {
+			if ( ! empty( $plugin_data->update->icons[ $preferred_icon ] ) ) {
+				$icon = '<img src="' . esc_url( $plugin_data->update->icons[ $preferred_icon ] ) . '" alt="" />';
+				break;
+			}
+		}
+
+		// Get plugin compat for running version of ClassicPress.
+		if ( isset($plugin_data->update->tested) && version_compare($plugin_data->update->tested, $cur_wp_version, '>=') ) {
+			$compat = '<br />' . sprintf(__('Expected compatibility with ClassicPress %1$s: 100%%.'), $cur_cp_version);
+			$compat .= ' <a href="https://link.classicpress.net/plugin-compatibility">' . __( 'More info.' ) . '</a>';
+		} elseif ( isset($plugin_data->update->compatibility->{$cur_wp_version}) ) {
+			$compat = $plugin_data->update->compatibility->{$cur_wp_version};
+			$compat = '<br />' . sprintf(__('Expected Compatibility with ClassicPress %1$s: %2$d%% (%3$d "works" votes out of %4$d total).'), $cur_cp_version, $compat->percent, $compat->votes, $compat->total_votes);
+			$compat .= ' <a href="https://link.classicpress.net/plugin-compatibility">' . __( 'More info.' ) . '</a>';
+		} else {
+			$compat = '<br />' . sprintf(__('Expected compatibility with ClassicPress %1$s: Unknown.'), $cur_cp_version);
+			$compat .= ' <a href="https://link.classicpress.net/plugin-compatibility">' . __( 'More info.' ) . '</a>';
+		}
+		// Get plugin compat for updated version of ClassicPress.
+		if ( $core_update_version ) {
+			if ( isset( $plugin_data->update->tested ) && version_compare( $plugin_data->update->tested, $core_update_version, '>=' ) ) {
+				$compat = '<br />' . sprintf( __( 'Expected compatibility with ClassicPress %1$s: 100%%.' ), $core_update_version );
+				$compat .= ' <a href="https://link.classicpress.net/plugin-compatibility">' . __( 'More info.' ) . '</a>';
+			} elseif ( isset( $plugin_data->update->compatibility->{$core_update_version} ) ) {
+				$update_compat = $plugin_data->update->compatibility->{$core_update_version};
+				$compat .= '<br />' . sprintf(__('Expected compatibility with ClassicPress %1$s: %2$d%% (%3$d "works" votes out of %4$d total).'), $core_update_version, $update_compat->percent, $update_compat->votes, $update_compat->total_votes);
+				$compat .= ' <a href="https://link.classicpress.net/plugin-compatibility">' . __( 'More info.' ) . '</a>';
+			} else {
+				$compat = '<br />' . sprintf(__('Expected compatibility with ClassicPress %1$s: Unknown.'), $core_update_version);
+				$compat .= ' <a href="https://link.classicpress.net/plugin-compatibility">' . __( 'More info.' ) . '</a>';
+			}
+		}
+		// Get the upgrade notice for the new plugin version.
+		if ( isset($plugin_data->update->upgrade_notice) ) {
+			$upgrade_notice = '<br />' . strip_tags($plugin_data->update->upgrade_notice);
+		} else {
+			$upgrade_notice = '';
+		}
+
+		$details_url = self_admin_url('plugin-install.php?tab=plugin-information&plugin=' . $plugin_data->update->slug . '&section=changelog&TB_iframe=true&width=640&height=662');
+		$details = sprintf(
+			'<a href="%1$s" class="thickbox open-plugin-details-modal" aria-label="%2$s">%3$s</a>',
+			esc_url( $details_url ),
+			/* translators: 1: plugin name, 2: version number */
+			esc_attr( sprintf( __( 'View %1$s version %2$s details' ), $plugin_data->Name, $plugin_data->update->new_version ) ),
+			/* translators: %s: plugin version */
+			sprintf( __( 'View version %s details.' ), $plugin_data->update->new_version )
+		);
+
+		$checkbox_id = "checkbox_" . md5( $plugin_data->Name );
+		?>
+		<tr>
+			<td class="check-column">
+				<input type="checkbox" name="checked[]" id="<?php echo $checkbox_id; ?>" value="<?php echo esc_attr( $plugin_file ); ?>" />
+				<label for="<?php echo $checkbox_id; ?>" class="screen-reader-text"><?php
+					/* translators: %s: plugin name */
+					printf( __( 'Select %s' ),
+						$plugin_data->Name
+					);
+				?></label>
+			</td>
+			<td class="plugin-title"><p>
+				<?php echo $icon; ?>
+				<strong><?php echo $plugin_data->Name; ?></strong>
+				<?php
+					/* translators: 1: plugin version, 2: new version */
+					printf( __( 'You have version %1$s installed. Update to %2$s.' ),
+						$plugin_data->Version,
+						$plugin_data->update->new_version
+					);
+					echo ' ' . $details . $compat . $upgrade_notice;
+				?>
+			</p></td>
+		</tr>
+		<?php
+	}
+?>
+	</tbody>
+
+	<tfoot>
+	<tr>
+		<td class="manage-column check-column"><input type="checkbox" id="plugins-select-all-2" /></td>
+		<td class="manage-column"><label for="plugins-select-all-2"><?php _e( 'Select All' ); ?></label></td>
+	</tr>
+	</tfoot>
+</table>
+<p><input id="upgrade-plugins-2" class="button" type="submit" value="<?php esc_attr_e('Update Plugins'); ?>" name="upgrade" /></p>
+</form>
+<?php
 }
 
 /**
- * @ignore
- * @since WP-4.4.0
+ * @since WP-2.9.0
  */
-function _upgrade_440_force_deactivate_incompatible_plugins() {
-	if ( defined( 'REST_API_VERSION' ) && version_compare( REST_API_VERSION, '2.0-beta4', '<=' ) ) {
-		deactivate_plugins( array( 'rest-api/plugin.php' ), true );
+function list_theme_updates() {
+	$themes = get_theme_updates();
+	if ( empty( $themes ) ) {
+		echo '<h2>' . __( 'Themes' ) . '</h2>';
+		echo '<p>' . __( 'Your themes are all up to date.' ) . '</p>';
+		return;
 	}
+
+	$form_action = 'update-core.php?action=do-theme-upgrade';
+?>
+<h2><?php _e( 'Themes' ); ?></h2>
+<p><?php _e( 'The following themes have new versions available. Check the ones you want to update and then click &#8220;Update Themes&#8221;.' ); ?></p>
+<p><?php printf( __( '<strong>Please Note:</strong> Any customizations you have made to theme files will be lost. Please consider using <a href="%s">child themes</a> for modifications.' ), __( 'https://codex.wordpress.org/Child_Themes' ) ); ?></p>
+<form method="post" action="<?php echo esc_url( $form_action ); ?>" name="upgrade-themes" class="upgrade">
+<?php wp_nonce_field('upgrade-core'); ?>
+<p><input id="upgrade-themes" class="button" type="submit" value="<?php esc_attr_e('Update Themes'); ?>" name="upgrade" /></p>
+<table class="widefat updates-table" id="update-themes-table">
+	<thead>
+	<tr>
+		<td class="manage-column check-column"><input type="checkbox" id="themes-select-all" /></td>
+		<td class="manage-column"><label for="themes-select-all"><?php _e( 'Select All' ); ?></label></td>
+	</tr>
+	</thead>
+
+	<tbody class="plugins">
+<?php
+	foreach ( $themes as $stylesheet => $theme ) {
+		$checkbox_id = 'checkbox_' . md5( $theme->get( 'Name' ) );
+		?>
+		<tr>
+			<td class="check-column">
+				<input type="checkbox" name="checked[]" id="<?php echo $checkbox_id; ?>" value="<?php echo esc_attr( $stylesheet ); ?>" />
+				<label for="<?php echo $checkbox_id; ?>" class="screen-reader-text"><?php
+					/* translators: %s: theme name */
+					printf( __( 'Select %s' ),
+						$theme->display( 'Name' )
+					);
+				?></label>
+			</td>
+			<td class="plugin-title"><p>
+				<img src="<?php echo esc_url( $theme->get_screenshot() ); ?>" width="85" height="64" class="updates-table-screenshot" alt="" />
+				<strong><?php echo $theme->display( 'Name' ); ?></strong>
+				<?php
+					/* translators: 1: theme version, 2: new version */
+					printf( __( 'You have version %1$s installed. Update to %2$s.' ),
+						$theme->display( 'Version' ),
+						$theme->update['new_version']
+					);
+				?>
+			</p></td>
+		</tr>
+		<?php
+	}
+?>
+	</tbody>
+
+	<tfoot>
+	<tr>
+		<td class="manage-column check-column"><input type="checkbox" id="themes-select-all-2" /></td>
+		<td class="manage-column"><label for="themes-select-all-2"><?php _e( 'Select All' ); ?></label></td>
+	</tr>
+	</tfoot>
+</table>
+<p><input id="upgrade-themes-2" class="button" type="submit" value="<?php esc_attr_e('Update Themes'); ?>" name="upgrade" /></p>
+</form>
+<?php
+}
+
+/**
+ * @since WP-3.7.0
+ */
+function list_translation_updates() {
+	$updates = wp_get_translation_updates();
+	if ( ! $updates ) {
+		if ( 'en_US' != get_locale() ) {
+			echo '<h2>' . __( 'Translations' ) . '</h2>';
+			echo '<p>' . __( 'Your translations are all up to date.' ) . '</p>';
+		}
+		return;
+	}
+
+	$form_action = 'update-core.php?action=do-translation-upgrade';
+	?>
+	<h2><?php _e( 'Translations' ); ?></h2>
+	<form method="post" action="<?php echo esc_url( $form_action ); ?>" name="upgrade-translations" class="upgrade">
+		<p><?php _e( 'New translations are available.' ); ?></p>
+		<?php wp_nonce_field( 'upgrade-translations' ); ?>
+		<p><input class="button" type="submit" value="<?php esc_attr_e( 'Update Translations' ); ?>" name="upgrade" /></p>
+	</form>
+	<?php
+}
+
+/**
+ * Upgrade ClassicPress core display.
+ *
+ * @since WP-2.7.0
+ *
+ * @global WP_Filesystem_Base $wp_filesystem Subclass
+ *
+ * @param bool $reinstall
+ */
+function do_core_upgrade( $reinstall = false ) {
+	global $wp_filesystem;
+
+	include_once( ABSPATH . 'wp-admin/includes/class-wp-upgrader.php' );
+
+	if ( $reinstall )
+		$url = 'update-core.php?action=do-core-reinstall';
+	else
+		$url = 'update-core.php?action=do-core-upgrade';
+	$url = wp_nonce_url($url, 'upgrade-core');
+
+	$version = isset( $_POST['version'] )? $_POST['version'] : false;
+	$locale = isset( $_POST['locale'] )? $_POST['locale'] : 'en_US';
+	$update = find_core_update( $version, $locale );
+	if ( !$update )
+		return;
+
+	// Allow relaxed file ownership writes for User-initiated upgrades when the API specifies
+	// that it's safe to do so. This only happens when there are no new files to create.
+	$allow_relaxed_file_ownership = ! $reinstall && isset( $update->new_files ) && ! $update->new_files;
+
+?>
+	<div class="wrap">
+	<h1><?php _e( 'Update ClassicPress' ); ?></h1>
+<?php
+
+	if ( false === ( $credentials = request_filesystem_credentials( $url, '', false, ABSPATH, array( 'version', 'locale' ), $allow_relaxed_file_ownership ) ) ) {
+		echo '</div>';
+		return;
+	}
+
+	if ( ! WP_Filesystem( $credentials, ABSPATH, $allow_relaxed_file_ownership ) ) {
+		// Failed to connect, Error and request again
+		request_filesystem_credentials( $url, '', true, ABSPATH, array( 'version', 'locale' ), $allow_relaxed_file_ownership );
+		echo '</div>';
+		return;
+	}
+
+	if ( $wp_filesystem->errors->get_error_code() ) {
+		foreach ( $wp_filesystem->errors->get_error_messages() as $message )
+			show_message($message);
+		echo '</div>';
+		return;
+	}
+
+	if ( $reinstall )
+		$update->response = 'reinstall';
+
+	add_filter( 'update_feedback', 'show_message' );
+
+	$upgrader = new Core_Upgrader();
+	$result = $upgrader->upgrade( $update, array(
+		'allow_relaxed_file_ownership' => $allow_relaxed_file_ownership
+	) );
+
+	if ( is_wp_error( $result ) ) {
+		show_message( $result );
+		switch ( $result->get_error_code() ) {
+			case 'up_to_date':
+				// ClassicPress is already up to date, no need to show a different message
+				break;
+
+			case 'locked':
+				// Show a bit more info for this fairly common error
+				show_message( __(
+					'It\'s possible that an update started, but the server encountered a temporary issue and could not continue.'
+				) );
+				show_message( __(
+					'Or, you may have clicked the update button multiple times.'
+				) );
+				show_message( __(
+					'Please wait <strong>15 minutes</strong> and try again.'
+				) );
+				show_message( sprintf(
+					/* translators: URL to support forum */
+					__( 'If you see this message after waiting 15 minutes and trying the update again, please make a post on our <a href="%s">support forum</a>.' ),
+					'https://forums.classicpress.net/c/support/'
+				) );
+				break;
+
+			default:
+				// Show a generic failure message
+				show_message( __( 'Installation Failed' ) );
+				break;
+		}
+		echo '</div>';
+		return;
+	}
+
+	show_message( __( 'ClassicPress updated successfully' ) );
+	show_message( '<span class="hide-if-no-js">' . sprintf( __( 'Welcome to ClassicPress %1$s. You will be redirected to the About ClassicPress screen. If not, click <a href="%2$s">here</a>.' ), $result, esc_url( self_admin_url( 'about.php?updated' ) ) ) . '</span>' );
+	show_message( '<span class="hide-if-js">' . sprintf( __( 'Welcome to ClassicPress %1$s. <a href="%2$s">Learn more</a>.' ), $result, esc_url( self_admin_url( 'about.php?updated' ) ) ) . '</span>' );
+	?>
+	</div>
+<!--
+	<script type="text/javascript">
+	//window.location = '<?php //echo self_admin_url( 'about.php?updated' ); ?>';
+	</script>
+-->
+	<?php
+}
+
+/**
+ * @since WP-2.7.0
+ */
+function do_dismiss_core_update() {
+	$version = isset( $_POST['version'] )? $_POST['version'] : false;
+	$locale = isset( $_POST['locale'] )? $_POST['locale'] : 'en_US';
+	$update = find_core_update( $version, $locale );
+	if ( !$update )
+		return;
+	dismiss_core_update( $update );
+	wp_redirect( wp_nonce_url('update-core.php?action=upgrade-core', 'upgrade-core') );
+	exit;
+}
+
+/**
+ * @since WP-2.7.0
+ */
+function do_undismiss_core_update() {
+	$version = isset( $_POST['version'] )? $_POST['version'] : false;
+	$locale = isset( $_POST['locale'] )? $_POST['locale'] : 'en_US';
+	$update = find_core_update( $version, $locale );
+	if ( !$update )
+		return;
+	undismiss_core_update( $version, $locale );
+	wp_redirect( wp_nonce_url('update-core.php?action=upgrade-core', 'upgrade-core') );
+	exit;
+}
+
+$action = isset($_GET['action']) ? $_GET['action'] : 'upgrade-core';
+
+$upgrade_error = false;
+if ( ( 'do-theme-upgrade' == $action || ( 'do-plugin-upgrade' == $action && ! isset( $_GET['plugins'] ) ) )
+	&& ! isset( $_POST['checked'] ) ) {
+	$upgrade_error = $action == 'do-theme-upgrade' ? 'themes' : 'plugins';
+	$action = 'upgrade-core';
+}
+
+$title = __('ClassicPress Updates');
+$parent_file = 'index.php';
+
+$updates_overview  = '<p>' . __( 'On this screen, you can update to the latest version of ClassicPress, as well as update your themes, plugins, and translations from the ClassicPress.net repositories.' ) . '</p>';
+$updates_overview .= '<p>' . __( 'If an update is available, you&#8127;ll see a notification appear in the Toolbar and navigation menu.' ) . ' ' . __( 'Keeping your site updated is important for security. It also makes the internet a safer place for you and your readers.' ) . '</p>';
+
+get_current_screen()->add_help_tab( array(
+	'id'      => 'overview',
+	'title'   => __( 'Overview' ),
+	'content' => $updates_overview
+) );
+
+$updates_howto  = '<p>' . __( '<strong>ClassicPress</strong> &mdash; Updating your ClassicPress installation is a simple one-click procedure: just <strong>click on the &#8220;Update Now&#8221; button</strong> when you are notified that a new version is available.' ) . ' ' . __( 'In most cases, ClassicPress will automatically apply maintenance and security updates in the background for you.' ) . '</p>';
+$updates_howto .= '<p>' . __( '<strong>Themes and Plugins</strong> &mdash; To update individual themes or plugins from this screen, use the checkboxes to make your selection, then <strong>click on the appropriate &#8220;Update&#8221; button</strong>. To update all of your themes or plugins at once, you can check the box at the top of the section to select all before clicking the update button.' ) . '</p>';
+
+if ( 'en_US' != get_locale() ) {
+	$updates_howto .= '<p>' . __( '<strong>Translations</strong> &mdash; The files translating ClassicPress into your language are updated for you whenever any other updates occur. But if these files are out of date, you can <strong>click the &#8220;Update Translations&#8221;</strong> button.' ) . '</p>';
+}
+
+get_current_screen()->add_help_tab( array(
+	'id'      => 'how-to-update',
+	'title'   => __( 'How to Update' ),
+	'content' => $updates_howto
+) );
+
+get_current_screen()->set_help_sidebar(
+	'<p><strong>' . __('For more information:') . '</strong></p>' .
+	'<p>' . __( '<a href="https://codex.wordpress.org/Dashboard_Updates_Screen">Documentation on Updating ClassicPress</a>' ) . '</p>' .
+	'<p>' . __( '<a href="https://forums.classicpress.net/c/support">Support Forums</a>' ) . '</p>'
+);
+
+if ( 'upgrade-core' == $action ) {
+	// Force a update check when requested
+	$force_check = ! empty( $_GET['force-check'] );
+	wp_version_check( array(), $force_check );
+
+	require_once(ABSPATH . 'wp-admin/admin-header.php');
+	?>
+	<div class="wrap">
+	<h1><?php _e( 'ClassicPress Updates' ); ?></h1>
+	<?php
+	if ( $upgrade_error ) {
+		echo '<div class="error"><p>';
+		if ( $upgrade_error == 'themes' )
+			_e('Please select one or more themes to update.');
+		else
+			_e('Please select one or more plugins to update.');
+		echo '</p></div>';
+	}
+
+	$last_update_check = false;
+	$current = get_site_transient( 'update_core' );
+
+	if ( $current && isset ( $current->last_checked ) )	{
+		$last_update_check = $current->last_checked + get_option( 'gmt_offset' ) * HOUR_IN_SECONDS;
+	}
+
+	echo '<p>';
+	/* translators: %1 date, %2 time. */
+	printf( __( 'Last checked on %1$s at %2$s.' ), date_i18n( __( 'F j, Y' ), $last_update_check ), date_i18n( __( 'g:i a' ), $last_update_check ) );
+	echo ' &nbsp; <a class="button" href="' . esc_url( self_admin_url('update-core.php?force-check=1') ) . '">' . __( 'Check Again' ) . '</a>';
+	echo '</p>';
+
+	if ( current_user_can( 'update_core' ) ) {
+		core_upgrade_preamble();
+	}
+	if ( current_user_can( 'update_plugins' ) ) {
+		list_plugin_updates();
+	}
+	if ( current_user_can( 'update_themes' ) ) {
+		list_theme_updates();
+	}
+	if ( current_user_can( 'update_languages' ) ) {
+		list_translation_updates();
+	}
+
+	/**
+	 * Fires after the core, plugin, and theme update tables.
+	 *
+	 * @since WP-2.9.0
+	 */
+	do_action( 'core_upgrade_preamble' );
+	echo '</div>';
+
+	wp_localize_script( 'updates', '_wpUpdatesItemCounts', array(
+		'totals'  => wp_get_update_data(),
+	) );
+
+	include(ABSPATH . 'wp-admin/admin-footer.php');
+
+} elseif ( 'do-core-upgrade' == $action || 'do-core-reinstall' == $action ) {
+
+	if ( ! current_user_can( 'update_core' ) )
+		wp_die( __( 'Sorry, you are not allowed to update this site.' ) );
+
+	check_admin_referer('upgrade-core');
+
+	// Do the (un)dismiss actions before headers, so that they can redirect.
+	//if ( isset( $_POST['dismiss'] ) )
+		//do_dismiss_core_update();
+	//elseif ( isset( $_POST['undismiss'] ) )
+		//do_undismiss_core_update();
+
+	//require_once(ABSPATH . 'wp-admin/admin-header.php');
+	if ( 'do-core-reinstall' == $action )
+		$reinstall = true;
+	else
+		$reinstall = false;
+
+	if ( isset( $_POST['upgrade'] ) )
+		do_core_upgrade($reinstall);
+
+	wp_localize_script( 'updates', '_wpUpdatesItemCounts', array(
+		'totals'  => wp_get_update_data(),
+	) );
+
+	//include(ABSPATH . 'wp-admin/admin-footer.php');
+
+} elseif ( 'do-plugin-upgrade' == $action ) {
+
+	if ( ! current_user_can( 'update_plugins' ) )
+		wp_die( __( 'Sorry, you are not allowed to update this site.' ) );
+
+	check_admin_referer('upgrade-core');
+
+	if ( isset( $_GET['plugins'] ) ) {
+		$plugins = explode( ',', $_GET['plugins'] );
+	} elseif ( isset( $_POST['checked'] ) ) {
+		$plugins = (array) $_POST['checked'];
+	} else {
+		wp_redirect( admin_url('update-core.php') );
+		exit;
+	}
+
+	$url = 'update.php?action=update-selected&plugins=' . urlencode(implode(',', $plugins));
+	$url = wp_nonce_url($url, 'bulk-update-plugins');
+
+	$title = __('Update Plugins');
+
+	require_once(ABSPATH . 'wp-admin/admin-header.php');
+	echo '<div class="wrap">';
+	echo '<h1>' . __( 'Update Plugins' ) . '</h1>';
+	echo '<iframe src="', $url, '" style="width: 100%; height: 100%; min-height: 750px;" frameborder="0" title="' . esc_attr__( 'Update progress' ) . '"></iframe>';
+	echo '</div>';
+
+	wp_localize_script( 'updates', '_wpUpdatesItemCounts', array(
+		'totals'  => wp_get_update_data(),
+	) );
+
+	include(ABSPATH . 'wp-admin/admin-footer.php');
+
+} elseif ( 'do-theme-upgrade' == $action ) {
+
+	if ( ! current_user_can( 'update_themes' ) )
+		wp_die( __( 'Sorry, you are not allowed to update this site.' ) );
+
+	check_admin_referer('upgrade-core');
+
+	if ( isset( $_GET['themes'] ) ) {
+		$themes = explode( ',', $_GET['themes'] );
+	} elseif ( isset( $_POST['checked'] ) ) {
+		$themes = (array) $_POST['checked'];
+	} else {
+		wp_redirect( admin_url('update-core.php') );
+		exit;
+	}
+
+	$url = 'update.php?action=update-selected-themes&themes=' . urlencode(implode(',', $themes));
+	$url = wp_nonce_url($url, 'bulk-update-themes');
+
+	$title = __('Update Themes');
+
+	require_once(ABSPATH . 'wp-admin/admin-header.php');
+	?>
+	<div class="wrap">
+		<h1><?php _e( 'Update Themes' ); ?></h1>
+		<iframe src="<?php echo $url ?>" style="width: 100%; height: 100%; min-height: 750px;" frameborder="0" title="<?php esc_attr_e( 'Update progress' ); ?>"></iframe>
+	</div>
+	<?php
+
+	wp_localize_script( 'updates', '_wpUpdatesItemCounts', array(
+		'totals'  => wp_get_update_data(),
+	) );
+
+	include(ABSPATH . 'wp-admin/admin-footer.php');
+
+} elseif ( 'do-translation-upgrade' == $action ) {
+
+	if ( ! current_user_can( 'update_languages' ) )
+		wp_die( __( 'Sorry, you are not allowed to update this site.' ) );
+
+	check_admin_referer( 'upgrade-translations' );
+
+	require_once( ABSPATH . 'wp-admin/admin-header.php' );
+	include_once( ABSPATH . 'wp-admin/includes/class-wp-upgrader.php' );
+
+	$url = 'update-core.php?action=do-translation-upgrade';
+	$nonce = 'upgrade-translations';
+	$title = __( 'Update Translations' );
+	$context = WP_LANG_DIR;
+
+	$upgrader = new Language_Pack_Upgrader( new Language_Pack_Upgrader_Skin( compact( 'url', 'nonce', 'title', 'context' ) ) );
+	$result = $upgrader->bulk_upgrade();
+
+	wp_localize_script( 'updates', '_wpUpdatesItemCounts', array(
+		'totals'  => wp_get_update_data(),
+	) );
+
+	require_once( ABSPATH . 'wp-admin/admin-footer.php' );
+
+} else {
+	/**
+	 * Fires for each custom update action on the ClassicPress Updates screen.
+	 *
+	 * The dynamic portion of the hook name, `$action`, refers to the
+	 * passed update action. The hook fires in lieu of all available
+	 * default update actions.
+	 *
+	 * @since WP-3.2.0
+	 */
+	do_action( "update-core-custom_{$action}" );
 }
