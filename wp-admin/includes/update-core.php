@@ -264,12 +264,13 @@ function update_core($from, $to) {
 		$files_writable = array_filter( $check_is_writable, array( $wp_filesystem, 'is_writable' ) );
 		if ( $files_writable !== $check_is_writable ) {
 			$files_not_writable = array_diff_key( $check_is_writable, $files_writable );
-echo "Files not writeable".PHP_EOL.
+echo "Files not writable...".PHP_EOL;
 print_r($files_not_writable);
 			foreach ( $files_not_writable as $relative_file_not_writable => $file_not_writable ) {
 				// If the writable check failed, chmod file to 0644 and try again, same as copy_dir().
 				$wp_filesystem->chmod( $file_not_writable, FS_CHMOD_FILE );
 				if ( $wp_filesystem->is_writable( $file_not_writable ) )
+apply_filters( 'update_feedback', __( 'Files not writable: ' . $file_not_writable ) );
 					unset( $files_not_writable[ $relative_file_not_writable ] );
 			}
 
