@@ -651,13 +651,15 @@ function _redirect_to_about_wordpress( $new_version ) {
 	show_message( '<span class="hide-if-js">' . sprintf( __( 'Welcome to ClassicPress %1$s. <a href="%2$s">Learn more</a>.' ), $new_version, 'about.php?updated' ) . '</span>' );
 	echo '</div>';
 	?>
+<!--
 <script type="text/javascript">
 window.location = 'about.php?updated';
 </script>
+-->
 	<?php
 
 	// Include admin-footer.php and exit.
-	include(ABSPATH . 'wp-admin/admin-footer.php');
+	//include(ABSPATH . 'wp-admin/admin-footer.php');
 	exit();
 }
 
