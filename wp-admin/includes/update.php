@@ -99,7 +99,7 @@ function find_core_auto_update() {
  */
 function get_core_checksums( $version, $locale ) {
 	$url = 'https://api.wordpress.org/core/checksums/1.0/?' . http_build_query( compact( 'version', 'locale' ), null, '&' );
-
+echo "URL = " . $url . PHP_EOL;
 	$options = array(
 		'timeout' => wp_doing_cron() ? 30 : 3,
 	);
