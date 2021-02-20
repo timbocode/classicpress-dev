@@ -584,16 +584,23 @@ function _copy_dir($from, $to, $skip_list = array() ) {
 			continue;
 
 		if ( 'f' == $fileinfo['type'] ) {
+echo " Copying file ".$filename;
 			if ( ! $wp_filesystem->copy($from . $filename, $to . $filename, true, FS_CHMOD_FILE) ) {
+echo " Copy failed. Trying chmod 644. ";
 				// If copy failed, chmod file to 0644 and try again.
 				$wp_filesystem->chmod( $to . $filename, FS_CHMOD_FILE );
-				if ( ! $wp_filesystem->copy($from . $filename, $to . $filename, true, FS_CHMOD_FILE) )
+				if ( ! $wp_filesystem->copy($from . $filename, $to . $filename, true, FS_CHMOD_FILE) ) {
+echo " Copy FAILED. ";
 					return new WP_Error( 'copy_failed__copy_dir', __( 'Could not copy file.' ), $to . $filename );
+				}
 			}
 		} elseif ( 'd' == $fileinfo['type'] ) {
+echo " Creating directory ".$to . $filename;
 			if ( !$wp_filesystem->is_dir($to . $filename) ) {
-				if ( !$wp_filesystem->mkdir($to . $filename, FS_CHMOD_DIR) )
+				if ( !$wp_filesystem->mkdir($to . $filename, FS_CHMOD_DIR) ) {
+echo " FAILED tocreate directory. ";
 					return new WP_Error( 'mkdir_failed__copy_dir', __( 'Could not create directory.' ), $to . $filename );
+				}
 			}
 
 			/*
@@ -605,7 +612,8 @@ function _copy_dir($from, $to, $skip_list = array() ) {
 				if ( 0 === strpos( $skip_item, $filename . '/' ) )
 					$sub_skip_list[] = preg_replace( '!^' . preg_quote( $filename, '!' ) . '/!i', '', $skip_item );
 			}
-
+echo " SUB SKiP LiST = ";
+print_r($sub_skip_list);
 			$result = _copy_dir($from . $filename, $to . $filename, $sub_skip_list);
 			if ( is_wp_error($result) )
 				return $result;
