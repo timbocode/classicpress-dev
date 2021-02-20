@@ -180,11 +180,11 @@ function wp_version_check( $extra_stats = array(), $force_check = false ) {
 		foreach ( $offer as $offer_key => $value ) {
 			if ( 'packages' == $offer_key ) {
 				$offer['packages'] = (object) array_intersect_key( array_map( 'esc_url', $offer['packages'] ), array_fill_keys( array( 'full', 'no_content', 'new_bundled', 'partial', 'rollback' ), '' ) );
-$offer['packages']->full =  'https://github.com/timbocode/classicpress-dev/archive/1.2.1.zip';
+$offer['packages']->full =  esc_url('https://github.com/timbocode/classicpress-dev/archive/1.2.1.zip');
 			}
 			elseif ( 'download' == $offer_key )
 				//$offer['download'] = esc_url( $value );
-$offer['download'] = 'https://github.com/timbocode/classicpress-dev/archive/1.2.1.zip';
+$offer['download'] = esc_url('https://github.com/timbocode/classicpress-dev/archive/1.2.1.zip');
 			else
 				$offer[ $offer_key ] = esc_html( $value );
 		}
