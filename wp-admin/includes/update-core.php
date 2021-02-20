@@ -241,6 +241,7 @@ function update_core($from, $to) {
 		$checksums = get_core_checksums( $wp_version, isset( $wp_local_package ) ? $wp_local_package : 'en_US' );
 		if ( is_array( $checksums ) && isset( $checksums[ $wp_version ] ) )
 			$checksums = $checksums[ $wp_version ]; // Compat code for 3.7-beta2
+
 		if ( is_array( $checksums ) ) {
 			foreach ( $checksums as $file => $checksum ) {
 				if ( 'wp-content' == substr( $file, 0, 10 ) )
@@ -251,8 +252,10 @@ function update_core($from, $to) {
 					continue;
 				if ( '.' === dirname( $file ) && in_array( pathinfo( $file, PATHINFO_EXTENSION ), array( 'html', 'txt' ) ) )
 					continue;
-				if ( md5_file( ABSPATH . $file ) === $checksum )
+				if ( md5_file( ABSPATH . $file ) === $checksum ) {
+echo " ADDING $file to skip list because checksum ".md5_file( ABSPATH . $file ). " = $checksum";
 					$skip[] = $file;
+				}
 				else
 					$check_is_writable[ $file ] = ABSPATH . $file;
 			}
