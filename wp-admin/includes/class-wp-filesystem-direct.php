@@ -196,10 +196,7 @@ class WP_Filesystem_Direct extends WP_Filesystem_Base {
 			return false;
 		if ( ! function_exists('posix_getpwuid') )
 			return $owneruid;
-		$ownerarray = posix_getpwuid( $owneruid );
-		if ( ! $ownerarray ) {
-			return false;
-		}
+		$ownerarray = posix_getpwuid($owneruid);
 		return $ownerarray['name'];
 	}
 
@@ -227,10 +224,7 @@ class WP_Filesystem_Direct extends WP_Filesystem_Base {
 			return false;
 		if ( ! function_exists('posix_getgrgid') )
 			return $gid;
-		$grouparray = posix_getgrgid( $gid );
-		if ( ! $grouparray ) {
-			return false;
-		}
+		$grouparray = posix_getgrgid($gid);
 		return $grouparray['name'];
 	}
 
