@@ -534,7 +534,7 @@ function cp_get_update_directory_root( $working_dir ) {
 	if (
 		count( $entries ) === 1 &&
 		(
-			substr( $entries[0]['name'], 0, 13 ) === 'ClassicPress-' ||
+			substr( $entries[0]['name'], 0, 13 ) === 'classicpress-' ||
 			$entries[0]['name'] === 'wordpress' // migration build
 		) &&
 		$entries[0]['type'] === 'd'
