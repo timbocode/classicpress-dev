@@ -69,17 +69,19 @@ class Core_Upgrader extends WP_Upgrader {
 
 		$distro = null;
 		$entries = array_values( $wp_filesystem->dirlist( $working_dir ) );
-
+echo " NAME = ".substr( $entries[0]['name'], 0, 13 );
 		if (
 			count( $entries ) === 1 &&
 			(
-				substr( $entries[0]['name'], 0, 13 ) === 'ClassicPress-' ||
+				substr( $entries[0]['name'], 0, 13 ) === 'classicpress-' ||
 				$entries[0]['name'] === 'wordpress' // migration build
 			) &&
 			$entries[0]['type'] === 'd'
 		) {
 			$distro = '/' . $entries[0]['name'] . '/';
 			$root = $working_dir . $distro;
+
+echo " ROOT = ".$root;
 			if (
 				! $wp_filesystem->exists( $root . 'readme.html' ) ||
 				! $wp_filesystem->exists( $root . 'wp-includes/version.php' )
